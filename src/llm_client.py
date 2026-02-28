@@ -31,6 +31,9 @@ class LLMClient:
         system_prompt: str,
         user_prompt: str,
         temperature: float,
+        top_p: float = 1.0,
+        presence_penalty: float = 0.0,
+        frequency_penalty: float = 0.0,
         max_output_tokens: int = 450,
         timeout_seconds: float = 30.0,
         retries: int = 2,
@@ -44,9 +47,10 @@ class LLMClient:
         for attempt in range(retries + 1):
             try:
                 logger.info(
-                    "OpenAI call | model={} | temperature={} | attempt={}/{}",
+                    "OpenAI call | model={} | temp={} | top_p={} | attempt={}/{}",
                     model,
                     temperature,
+                    top_p,
                     attempt + 1,
                     retries + 1,
                 )
@@ -64,6 +68,9 @@ class LLMClient:
                 response = self._client.chat.completions.create(
                     model=model,
                     temperature=temperature,
+                    top_p=top_p,
+                    presence_penalty=presence_penalty,
+                    frequency_penalty=frequency_penalty,
                     max_tokens=max_output_tokens,
                     timeout=timeout_seconds,
                     messages=messages,

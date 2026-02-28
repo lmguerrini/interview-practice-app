@@ -45,6 +45,60 @@ def render_sidebar(settings: dict) -> dict:
         help="Higher = more creative. Lower = more deterministic.",
     )
 
+    top_p = st.sidebar.slider(
+        "Top-p",
+        min_value=0.1,
+        max_value=1.0,
+        value=1.0,
+        step=0.1,
+        help="Nucleus sampling. Lower values make output more focused.",
+    )
+
+    presence_penalty = st.sidebar.slider(
+        "Presence penalty",
+        min_value=-2.0,
+        max_value=2.0,
+        value=0.0,
+        step=0.5,
+        help="Encourages introducing new topics (higher) vs staying on existing ones (lower).",
+    )
+
+    frequency_penalty = st.sidebar.slider(
+        "Frequency penalty",
+        min_value=-2.0,
+        max_value=2.0,
+        value=0.0,
+        step=0.5,
+        help="Reduces repetition when higher.",
+    )
+
+    max_output_tokens = st.sidebar.slider(
+        "Max output tokens",
+        min_value=80,
+        max_value=900,
+        value=250,
+        step=10,
+        help="Upper bound for the model output length.",
+    )
+
+    timeout_seconds = st.sidebar.slider(
+        "Timeout (seconds)",
+        min_value=5,
+        max_value=90,
+        value=30,
+        step=5,
+        help="Request timeout for the API call.",
+    )
+
+    retries = st.sidebar.slider(
+        "Retries",
+        min_value=0,
+        max_value=4,
+        value=2,
+        step=1,
+        help="How many times to retry after a failed request.",
+    )
+
     st.sidebar.markdown("### Prompt strategy")
     strategy_names = list(PROMPT_STRATEGIES.keys())
     prompt_strategy = st.sidebar.selectbox(
@@ -89,6 +143,12 @@ def render_sidebar(settings: dict) -> dict:
     return {
         "model": model,
         "temperature": temperature,
+        "top_p": top_p,
+        "presence_penalty": presence_penalty,
+        "frequency_penalty": frequency_penalty,
+        "max_output_tokens": int(max_output_tokens),
+        "timeout_seconds": float(timeout_seconds),
+        "retries": int(retries),
         "prompt_strategy": prompt_strategy,
         "track": track,
         "difficulty": difficulty,
@@ -201,7 +261,12 @@ def main() -> None:
                             system_prompt=system_prompt,
                             user_prompt=user_prompt,
                             temperature=ui_settings["temperature"],
-                            max_output_tokens=250,
+                            top_p=ui_settings.get("top_p", 1.0),
+                            presence_penalty=ui_settings.get("presence_penalty", 0.0),
+                            frequency_penalty=ui_settings.get("frequency_penalty", 0.0),
+                            max_output_tokens=ui_settings.get("max_output_tokens", 250),
+                            timeout_seconds=ui_settings.get("timeout_seconds", 30.0),
+                            retries=ui_settings.get("retries", 2),
                         )
 
                     st.session_state["first_question"] = question
@@ -246,7 +311,12 @@ def main() -> None:
                             system_prompt=system_prompt,
                             user_prompt=user_prompt,
                             temperature=0.2,
+                            top_p=1.0,
+                            presence_penalty=0.0,
+                            frequency_penalty=0.0,
                             max_output_tokens=650,
+                            timeout_seconds=ui_settings["timeout_seconds"],
+                            retries=ui_settings["retries"],
                         )
 
                     st.session_state["app_critique"] = critique
