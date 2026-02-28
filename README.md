@@ -1,26 +1,28 @@
-# 👨🏼‍🏫 Interview Practice App
+# Interview Practice App 
 
-A single-page Interview Practice App designed specifically for **Software & AI Engineering** interview preparation.
+A single-page Interview Practice App designed for **Software & AI Engineering** interview preparation.
 
----
+## Setup
 
-## 🛠️ Setup & Installation
-
-Follow these steps to get your environment ready:
-
-### 1. Install Dependencies
+### 1) Install dependencies
 Run the following command in your terminal:
-```bash
+```
 pip install -r requirements.txt
 ```
-### 2. Configure Environment Variables
-
-Create a local .env file (ensure this is never committed to your repository):
+### 2) Configure environment variables (local only)
+Create a local `.env` file (never commit it):
 ```
-bash streamlit run app.py
+cp .env.example .env
+```
+Open `.env` and set your key:
+```
+OPENAI_API_KEY=your_openai_api_key_here
+```
+### 3) Run the app
+```
+streamlit run app.py
 ```
 
-
-### Security Notes
-- Do not paste secrets in the chat.
-- The app reads `OPENAI_API_KEY` only from environment variables / `.env`.
+## Security Notes
+- Never paste secrets (API keys, passwords) into the app UI.
+- `.env` is intentionally git-ignored.
