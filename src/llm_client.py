@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import time
-from typing import Optional
+from typing import Optional, cast
 
 from loguru import logger
 from openai import OpenAI
+from openai.types.chat import ChatCompletionMessageParam
 
 
 class LLMClient:
@@ -50,15 +51,22 @@ class LLMClient:
                     retries + 1,
                 )
 
+                system_msg = cast(
+                    ChatCompletionMessageParam,
+                    cast(object, {"role": "system", "content": system_prompt}),
+                )
+                user_msg = cast(
+                    ChatCompletionMessageParam,
+                    cast(object, {"role": "user", "content": user_prompt}),
+                )
+                messages: list[ChatCompletionMessageParam] = [system_msg, user_msg]
+
                 response = self._client.chat.completions.create(
                     model=model,
                     temperature=temperature,
                     max_tokens=max_output_tokens,
                     timeout=timeout_seconds,
-                    messages=[
-                        {"role": "system", "content": system_prompt},
-                        {"role": "user", "content": user_prompt},
-                    ],
+                    messages=messages,
                 )
 
                 text = (response.choices[0].message.content or "").strip()
