@@ -143,7 +143,13 @@ PROMPT_STRATEGIES = {
 }
 
 
-def user_prompt_first_question(role: str, focus_areas: str, difficulty: str, job_description: str) -> str:
+def user_prompt_first_question(
+    role: str,
+    focus_areas: str,
+    difficulty: str,
+    job_description: str,
+    response_style: str,
+) -> str:
     """
     Build the user prompt that requests the first interview question.
 
@@ -154,6 +160,20 @@ def user_prompt_first_question(role: str, focus_areas: str, difficulty: str, job
     focus_areas = (focus_areas or "").strip()
     difficulty = (difficulty or "").strip()
     job_description = (job_description or "").strip()
+    response_style = (response_style or "").strip()
+
+    difficulty_guidance = (
+        "Difficulty guidance:\n"
+        "- Easy: fundamentals, definitions, small examples.\n"
+        "- Medium: practical trade-offs, common pitfalls, real-world constraints.\n"
+        "- Hard: edge cases, scalability, deep reasoning, ambiguous requirements.\n"
+    )
+
+    style_guidance = (
+        "Response style guidance:\n"
+        "- Brief: short question, minimal context, no multi-part requirements.\n"
+        "- Detailed: include realistic context and constraints in the question, but still output ONE question.\n"
+    )
 
     return (
         "<<<ROLE>>>\n"
@@ -162,7 +182,15 @@ def user_prompt_first_question(role: str, focus_areas: str, difficulty: str, job
         f"{focus_areas}\n\n"
         "<<<DIFFICULTY>>>\n"
         f"{difficulty}\n\n"
+        "<<<RESPONSE_STYLE>>>\n"
+        f"{response_style}\n\n"
         "<<<JOB_DESCRIPTION>>>\n"
         f"{job_description}\n\n"
-        "Task: Generate the first interview question. Return only the question.\n"
+        f"{difficulty_guidance}\n"
+        f"{style_guidance}\n"
+        "Task: Generate the first interview question.\n"
+        "Rules:\n"
+        "- Return ONLY the question text.\n"
+        "- Ask exactly ONE question.\n"
+        "- Do not add any headings, bullets, or commentary.\n"
     )

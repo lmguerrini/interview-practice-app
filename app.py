@@ -63,6 +63,13 @@ def render_sidebar(settings: dict) -> dict:
         help="Controls how challenging the questions will be.",
     )
 
+    response_style = st.sidebar.selectbox(
+        "Response style",
+        options=["Brief", "Detailed"],
+        index=0,
+        help="Brief = short question. Detailed = realistic context & constraints (still one question).",
+    )
+
     persona = st.sidebar.selectbox(
         "Interviewer persona",
         options=["Neutral", "Strict", "Friendly"],
@@ -79,6 +86,7 @@ def render_sidebar(settings: dict) -> dict:
         "prompt_strategy": prompt_strategy,
         "track": track,
         "difficulty": difficulty,
+        "response_style": response_style,
         "persona": persona,
         "openai_api_key_present": bool(settings.get("OPENAI_API_KEY")),
     }
@@ -173,6 +181,7 @@ def main() -> None:
                         focus_areas=focus_areas,
                         difficulty=ui_settings["difficulty"],
                         job_description=job_description,
+                        response_style=ui_settings["response_style"],
                     )
 
                     with st.spinner("Calling the model..."):  # type: ignore[call-arg]
