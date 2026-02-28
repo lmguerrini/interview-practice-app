@@ -1,9 +1,15 @@
+import time
 import streamlit as st
 
 from src.config import load_settings
 from src.logging_setup import setup_logging
 from src.llm_client import LLMClient
-from src.prompts import PROMPT_STRATEGIES, user_prompt_first_question
+from src.prompts import (
+    PROMPT_STRATEGIES,
+    system_prompt_app_critic,
+    user_prompt_app_critic,
+    user_prompt_first_question,
+)
 from src.guards import rate_limit_ok, validate_inputs
 
 
@@ -160,6 +166,11 @@ def main() -> None:
     if "call_timestamps" not in st.session_state:
         st.session_state["call_timestamps"] = []
 
+    # Rate-limit indicator (helps explain why rate limiting may/may not trigger).
+    now_ts = time.time()
+    recent_calls = [t for t in st.session_state["call_timestamps"] if now_ts - t <= 60]
+    st.caption(f"Rate limit: {len(recent_calls)}/6 calls in the last 60 seconds.")
+
     generate_disabled = not ui_settings["openai_api_key_present"]
     if st.button("Generate first question", type="primary", disabled=generate_disabled):
         guard = validate_inputs(role, focus_areas, job_description)
@@ -202,6 +213,50 @@ def main() -> None:
     if "first_question" in st.session_state:
         st.markdown("### Question")
         st.write(st.session_state["first_question"])
+
+    st.markdown("---")
+    st.subheader("Quick self-review (AI critique)")
+
+    critique_disabled = not ui_settings["openai_api_key_present"]
+    if st.button("Critique this app (quick review)", disabled=critique_disabled):
+        guard = validate_inputs(role, focus_areas, job_description)
+        if not guard.allowed:
+            st.warning(guard.user_message)
+        else:
+            ok, msg = rate_limit_ok(timestamps=st.session_state["call_timestamps"])
+            if not ok:
+                st.warning(msg)
+            else:
+                try:
+                    client = LLMClient(api_key=settings["OPENAI_API_KEY"])
+
+                    system_prompt = system_prompt_app_critic()
+                    user_prompt = user_prompt_app_critic(
+                        model=ui_settings["model"],
+                        temperature=ui_settings["temperature"],
+                        strategy_name=ui_settings["prompt_strategy"],
+                        difficulty=ui_settings["difficulty"],
+                        response_style=ui_settings["response_style"],
+                        persona=ui_settings["persona"],
+                    )
+
+                    with st.spinner("Generating critique..."):  # type: ignore[call-arg]
+                        critique = client.generate_text(
+                            model=ui_settings["model"],
+                            system_prompt=system_prompt,
+                            user_prompt=user_prompt,
+                            temperature=0.2,
+                            max_output_tokens=650,
+                        )
+
+                    st.session_state["app_critique"] = critique
+
+                except Exception as exc:
+                    st.error(f"Could not generate critique. Please try again. Error: {exc}")
+
+    if "app_critique" in st.session_state:
+        st.markdown("### Critique output")
+        st.text(st.session_state["app_critique"])
 
     # Store inputs in session state for the upcoming multi-turn chat logic.
     st.session_state["role"] = role
