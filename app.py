@@ -11,6 +11,7 @@ from src.prompts import (
     user_prompt_first_question,
 )
 from src.guards import rate_limit_ok, validate_inputs
+from src.pricing import estimate_call_cost_usd
 
 
 def render_sidebar(settings: dict) -> dict:
@@ -218,6 +219,35 @@ def main() -> None:
             height=220,
             max_chars=3000,
         )
+
+    # --- Cost estimate (sidebar, always visible) ---
+    try:
+        strategy_fn = PROMPT_STRATEGIES[ui_settings["prompt_strategy"]]
+        system_prompt_preview = strategy_fn(ui_settings["persona"])
+        user_prompt_preview = user_prompt_first_question(
+            role=role,
+            focus_areas=focus_areas,
+            difficulty=ui_settings["difficulty"],
+            job_description=job_description,
+            response_style=ui_settings["response_style"],
+        )
+        estimate = estimate_call_cost_usd(
+            model=ui_settings["model"],
+            system_prompt=system_prompt_preview,
+            user_prompt=user_prompt_preview,
+            output_tokens=ui_settings["max_output_tokens"],
+        )
+
+        st.sidebar.markdown("---")
+        st.sidebar.markdown("### Cost estimate (approx.)")
+        st.sidebar.write(f"Input tokens: **~{estimate.input_tokens}**")
+        st.sidebar.write(f"Output tokens: **~{estimate.output_tokens}**")
+        st.sidebar.write(f"Total tokens: **~{estimate.total_tokens}**")
+        st.sidebar.write(f"Estimated cost: **${estimate.estimated_cost_usd:.6f}**")
+        st.sidebar.caption(estimate.note)
+    except Exception:
+        # Cost estimate should never break the app.
+        pass
 
     st.markdown("---")
     st.subheader("Generate your first question")
