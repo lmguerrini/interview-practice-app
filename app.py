@@ -3,7 +3,7 @@ import streamlit as st
 from src.config import load_settings
 from src.logging_setup import setup_logging
 from src.llm_client import LLMClient
-from src.prompts import system_prompt_basic_interviewer, user_prompt_first_question
+from src.prompts import PROMPT_STRATEGIES, user_prompt_first_question
 
 
 def render_sidebar(settings: dict) -> dict:
@@ -38,6 +38,15 @@ def render_sidebar(settings: dict) -> dict:
         help="Higher = more creative. Lower = more deterministic.",
     )
 
+    st.sidebar.markdown("### Prompt strategy")
+    strategy_names = list(PROMPT_STRATEGIES.keys())
+    prompt_strategy = st.sidebar.selectbox(
+        "Strategy",
+        options=strategy_names,
+        index=0,
+        help="Different prompt-engineering techniques for the system prompt.",
+    )
+
     st.sidebar.markdown("### Interview Settings")
     track = st.sidebar.selectbox(
         "Track",
@@ -50,14 +59,14 @@ def render_sidebar(settings: dict) -> dict:
         "Difficulty",
         options=["Easy", "Medium", "Hard"],
         index=1,
-        help="Controls how challenging the questions will be (implemented later).",
+        help="Controls how challenging the questions will be.",
     )
 
     persona = st.sidebar.selectbox(
         "Interviewer persona",
         options=["Neutral", "Strict", "Friendly"],
         index=0,
-        help="Controls the interviewer tone (implemented later).",
+        help="Controls the interviewer tone.",
     )
 
     st.sidebar.markdown("---")
@@ -66,6 +75,7 @@ def render_sidebar(settings: dict) -> dict:
     return {
         "model": model,
         "temperature": temperature,
+        "prompt_strategy": prompt_strategy,
         "track": track,
         "difficulty": difficulty,
         "persona": persona,
@@ -145,10 +155,17 @@ def main() -> None:
         try:
             client = LLMClient(api_key=settings["OPENAI_API_KEY"])
 
-            system_prompt = system_prompt_basic_interviewer(ui_settings["persona"])
-            user_prompt = user_prompt_first_question(role, focus_areas, ui_settings["difficulty"])
+            strategy_fn = PROMPT_STRATEGIES[ui_settings["prompt_strategy"]]
+            system_prompt = strategy_fn(ui_settings["persona"])
 
-            with st.spinner("Calling the model..."):
+            user_prompt = user_prompt_first_question(
+                role=role,
+                focus_areas=focus_areas,
+                difficulty=ui_settings["difficulty"],
+                job_description=job_description,
+            )
+
+            with st.spinner("Calling the model..."): # type: ignore[call-arg]
                 question = client.generate_text(
                     model=ui_settings["model"],
                     system_prompt=system_prompt,
