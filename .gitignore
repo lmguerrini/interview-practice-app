@@ -1,0 +1,23 @@
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.egg-info/
+dist/
+build/
+
+# Virtual environments
+.venv/
+venv/
+
+# Streamlit
+.streamlit/
+
+# IDE
+.idea/
+
+# Secrets
+.env
+
+# OS
+.DS_Store
