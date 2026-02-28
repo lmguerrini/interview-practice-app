@@ -4,6 +4,7 @@ from src.config import load_settings
 from src.logging_setup import setup_logging
 from src.llm_client import LLMClient
 from src.prompts import PROMPT_STRATEGIES, user_prompt_first_question
+from src.guards import rate_limit_ok, validate_inputs
 
 
 def render_sidebar(settings: dict) -> dict:
@@ -87,10 +88,7 @@ def main() -> None:
     """
     Streamlit entry point.
 
-    Phase 2 goal:
-    - Connect to OpenAI API
-    - Generate the first interview question from the UI
-    - Keep UX friendly with safe error handling
+    The app builds an interview practice UI and calls the OpenAI API to generate questions.
     """
     setup_logging()
     settings = load_settings()
@@ -150,35 +148,47 @@ def main() -> None:
     st.markdown("---")
     st.subheader("Generate your first question")
 
+    # Initialize rate limiting state for this browser session.
+    if "call_timestamps" not in st.session_state:
+        st.session_state["call_timestamps"] = []
+
     generate_disabled = not ui_settings["openai_api_key_present"]
     if st.button("Generate first question", type="primary", disabled=generate_disabled):
-        try:
-            client = LLMClient(api_key=settings["OPENAI_API_KEY"])
+        guard = validate_inputs(role, focus_areas, job_description)
+        if not guard.allowed:
+            st.warning(guard.user_message)
+        else:
+            ok, msg = rate_limit_ok(timestamps=st.session_state["call_timestamps"])
+            if not ok:
+                st.warning(msg)
+            else:
+                try:
+                    client = LLMClient(api_key=settings["OPENAI_API_KEY"])
 
-            strategy_fn = PROMPT_STRATEGIES[ui_settings["prompt_strategy"]]
-            system_prompt = strategy_fn(ui_settings["persona"])
+                    strategy_fn = PROMPT_STRATEGIES[ui_settings["prompt_strategy"]]
+                    system_prompt = strategy_fn(ui_settings["persona"])
 
-            user_prompt = user_prompt_first_question(
-                role=role,
-                focus_areas=focus_areas,
-                difficulty=ui_settings["difficulty"],
-                job_description=job_description,
-            )
+                    user_prompt = user_prompt_first_question(
+                        role=role,
+                        focus_areas=focus_areas,
+                        difficulty=ui_settings["difficulty"],
+                        job_description=job_description,
+                    )
 
-            with st.spinner("Calling the model..."): # type: ignore[call-arg]
-                question = client.generate_text(
-                    model=ui_settings["model"],
-                    system_prompt=system_prompt,
-                    user_prompt=user_prompt,
-                    temperature=ui_settings["temperature"],
-                    max_output_tokens=250,
-                )
+                    with st.spinner("Calling the model..."):  # type: ignore[call-arg]
+                        question = client.generate_text(
+                            model=ui_settings["model"],
+                            system_prompt=system_prompt,
+                            user_prompt=user_prompt,
+                            temperature=ui_settings["temperature"],
+                            max_output_tokens=250,
+                        )
 
-            st.session_state["first_question"] = question
+                    st.session_state["first_question"] = question
 
-        except Exception as exc:
-            # Keep the UI message simple; details are in logs.
-            st.error(f"Could not generate a question. Please try again. Error: {exc}")
+                except Exception as exc:
+                    # Keep the UI message simple; details are in logs.
+                    st.error(f"Could not generate a question. Please try again. Error: {exc}")
 
     if "first_question" in st.session_state:
         st.markdown("### Question")
