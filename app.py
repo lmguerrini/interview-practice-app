@@ -2,6 +2,8 @@ import streamlit as st
 
 from src.config import load_settings
 from src.logging_setup import setup_logging
+from src.llm_client import LLMClient
+from src.prompts import system_prompt_basic_interviewer, user_prompt_first_question
 
 
 def render_sidebar(settings: dict) -> dict:
@@ -21,8 +23,9 @@ def render_sidebar(settings: dict) -> dict:
             "gpt-4.1-mini",
             "gpt-4.1-nano",
             "gpt-4o",
+            "gpt-4o-mini",
         ],
-        index=3,  # Default to cost-effective
+        index=4,  # Default to cost-effective
         help="Pick one of the allowed models for this project.",
     )
 
@@ -74,10 +77,10 @@ def main() -> None:
     """
     Streamlit entry point.
 
-    Phase 1 goal:
-    - Build a clean, stable UI skeleton
-    - Load env-based settings safely
-    - Prepare session state for upcoming multi-turn chat
+    Phase 2 goal:
+    - Connect to OpenAI API
+    - Generate the first interview question from the UI
+    - Keep UX friendly with safe error handling
     """
     setup_logging()
     settings = load_settings()
@@ -135,10 +138,34 @@ def main() -> None:
         )
 
     st.markdown("---")
-    st.subheader("Next step")
-    st.info(
-        "Phase 2: we will connect to the OpenAI API and generate the first interview question."
-    )
+    st.subheader("Generate your first question")
+
+    generate_disabled = not ui_settings["openai_api_key_present"]
+    if st.button("Generate first question", type="primary", disabled=generate_disabled):
+        try:
+            client = LLMClient(api_key=settings["OPENAI_API_KEY"])
+
+            system_prompt = system_prompt_basic_interviewer(ui_settings["persona"])
+            user_prompt = user_prompt_first_question(role, focus_areas, ui_settings["difficulty"])
+
+            with st.spinner("Calling the model..."):
+                question = client.generate_text(
+                    model=ui_settings["model"],
+                    system_prompt=system_prompt,
+                    user_prompt=user_prompt,
+                    temperature=ui_settings["temperature"],
+                    max_output_tokens=250,
+                )
+
+            st.session_state["first_question"] = question
+
+        except Exception as exc:
+            # Keep the UI message simple; details are in logs.
+            st.error(f"Could not generate a question. Please try again. Error: {exc}")
+
+    if "first_question" in st.session_state:
+        st.markdown("### Question")
+        st.write(st.session_state["first_question"])
 
     # Store inputs in session state for the upcoming multi-turn chat logic.
     st.session_state["role"] = role
