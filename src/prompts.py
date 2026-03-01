@@ -251,3 +251,94 @@ def user_prompt_app_critic(
         "<<<NEXT_IMPROVEMENTS>>>\n"
         "- ... (5 bullets)\n"
     )
+
+
+def system_prompt_json_only() -> str:
+    """
+    System prompt enforcing JSON-only output.
+    """
+    return (
+        "You are a precise assistant.\n"
+        "You MUST return valid JSON only.\n"
+        "Do not wrap JSON in markdown fences.\n"
+        "Do not add any extra text.\n"
+    )
+
+
+def user_prompt_interview_plan_json(
+    *,
+    role: str,
+    focus_areas: str,
+    difficulty: str,
+    strategy_name: str,
+    persona: str,
+) -> str:
+    """
+    Ask for an InterviewPlan JSON object.
+    """
+    return (
+        "Create an interview plan as a JSON object.\n"
+        "Rules: output JSON only.\n\n"
+        f"Role: {role}\n"
+        f"Difficulty: {difficulty}\n"
+        f"Focus areas (raw text): {focus_areas}\n"
+        f"Prompt strategy name: {strategy_name}\n"
+        f"Interviewer persona: {persona}\n\n"
+        "JSON schema (keys and expectations):\n"
+        "{\n"
+        '  "role": string,\n'
+        '  "difficulty": "Easy" | "Medium" | "Hard",\n'
+        '  "focus_areas": [string, ...],\n'
+        '  "total_questions": integer (1-20),\n'
+        '  "strategy": string,\n'
+        '  "persona": string,\n'
+        '  "rubric_criteria": [string, ...],\n'
+        '  "tips": [string, ...]\n'
+        "}\n"
+        "Constraints:\n"
+        "- focus_areas must be a clean list derived from the raw text.\n"
+        "- rubric_criteria must be practical for Software & AI Engineering interviews.\n"
+        "- tips must be actionable.\n"
+    )
+
+
+def user_prompt_final_feedback_json(
+    *,
+    role: str,
+    difficulty: str,
+    question: str,
+    answer: str,
+) -> str:
+    """
+    Ask for a FinalFeedback JSON object based on the user's answer.
+    """
+    return (
+        "Evaluate the candidate answer and return final feedback as JSON.\n"
+        "Rules: output JSON only.\n\n"
+        f"Role: {role}\n"
+        f"Difficulty: {difficulty}\n"
+        f"Question: {question}\n"
+        f"Candidate answer: {answer}\n\n"
+        "JSON schema:\n"
+        "{\n"
+        '  "role": string,\n'
+        '  "difficulty": "Easy" | "Medium" | "Hard",\n'
+        '  "question": string,\n'
+        '  "answer_summary": string,\n'
+        '  "scores": {\n'
+        '    "clarity": 1-10,\n'
+        '    "correctness": 1-10,\n'
+        '    "depth": 1-10,\n'
+        '    "structure": 1-10,\n'
+        '    "communication": 1-10\n'
+        "  },\n"
+        '  "strengths": [string, ...],\n'
+        '  "weaknesses": [string, ...],\n'
+        '  "improved_answer_outline": [string, ...],\n'
+        '  "next_steps": [string, ...]\n'
+        "}\n"
+        "Constraints:\n"
+        "- Be honest but constructive.\n"
+        "- Use scores that match the written critique.\n"
+        "- improved_answer_outline must be concise bullets.\n"
+    )

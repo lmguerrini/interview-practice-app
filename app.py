@@ -1,14 +1,20 @@
 import time
 import streamlit as st
 
+from src.json_utils import parse_json_loose
+from src.schemas import FinalFeedback, InterviewPlan
+
 from src.config import load_settings
 from src.logging_setup import setup_logging
 from src.llm_client import LLMClient
 from src.prompts import (
     PROMPT_STRATEGIES,
     system_prompt_app_critic,
+    system_prompt_json_only,
     user_prompt_app_critic,
+    user_prompt_final_feedback_json,
     user_prompt_first_question,
+    user_prompt_interview_plan_json,
 )
 from src.guards import rate_limit_ok, validate_inputs
 from src.pricing import estimate_call_cost_usd
@@ -359,6 +365,112 @@ def main() -> None:
     if "app_critique" in st.session_state:
         st.markdown("### Critique output")
         st.text(st.session_state["app_critique"])
+
+    # Store inputs in session state for the upcoming multi-turn chat logic.
+    st.markdown("---")
+    st.subheader("Structured outputs (JSON)")
+
+    col_json_1, col_json_2 = st.columns(2)
+
+    with col_json_1:
+        st.markdown("#### Interview plan (JSON)")
+        if st.button("Generate interview plan (JSON)"):
+            guard = validate_inputs(role, focus_areas, job_description)
+            if not guard.allowed:
+                st.warning(guard.user_message)
+            else:
+                ok, msg = rate_limit_ok(timestamps=st.session_state["call_timestamps"])
+                if not ok:
+                    st.warning(msg)
+                else:
+                    try:
+                        client = LLMClient(api_key=settings["OPENAI_API_KEY"])
+                        system_prompt = system_prompt_json_only()
+                        user_prompt = user_prompt_interview_plan_json(
+                            role=role,
+                            focus_areas=focus_areas,
+                            difficulty=ui_settings["difficulty"],
+                            strategy_name=ui_settings["prompt_strategy"],
+                            persona=ui_settings["persona"],
+                        )
+
+                        with st.spinner("Generating plan JSON..."):  # type: ignore[call-arg]
+                            raw = client.generate_text(
+                                model=ui_settings["model"],
+                                system_prompt=system_prompt,
+                                user_prompt=user_prompt,
+                                temperature=0.2,
+                                top_p=1.0,
+                                presence_penalty=0.0,
+                                frequency_penalty=0.0,
+                                max_output_tokens=650,
+                                timeout_seconds=ui_settings["timeout_seconds"],
+                                retries=ui_settings["retries"],
+                            )
+
+                        data = parse_json_loose(raw)
+                        plan = InterviewPlan.model_validate(data)
+                        st.session_state["interview_plan_json"] = plan.model_dump()
+
+                    except Exception as exc:
+                        st.error(f"Could not generate plan JSON. Error: {exc}")
+
+        if "interview_plan_json" in st.session_state:
+            st.json(st.session_state["interview_plan_json"])
+
+    with col_json_2:
+        st.markdown("#### Final feedback (JSON)")
+        answer_text = st.text_area(
+            "Paste your answer to the latest question",
+            value="",
+            height=160,
+            max_chars=3000,
+            help="For now, this evaluates your answer to the currently shown question.",
+        )
+
+        if st.button("Generate final feedback (JSON)"):
+            if "first_question" not in st.session_state:
+                st.warning("Generate a question first, then paste your answer.")
+            elif not answer_text.strip():
+                st.warning("Please paste your answer before generating feedback.")
+            else:
+                ok, msg = rate_limit_ok(timestamps=st.session_state["call_timestamps"])
+                if not ok:
+                    st.warning(msg)
+                else:
+                    try:
+                        client = LLMClient(api_key=settings["OPENAI_API_KEY"])
+                        system_prompt = system_prompt_json_only()
+                        user_prompt = user_prompt_final_feedback_json(
+                            role=role,
+                            difficulty=ui_settings["difficulty"],
+                            question=st.session_state["first_question"],
+                            answer=answer_text,
+                        )
+
+                        with st.spinner("Generating feedback JSON..."):  # type: ignore[call-arg]
+                            raw = client.generate_text(
+                                model=ui_settings["model"],
+                                system_prompt=system_prompt,
+                                user_prompt=user_prompt,
+                                temperature=0.2,
+                                top_p=1.0,
+                                presence_penalty=0.0,
+                                frequency_penalty=0.0,
+                                max_output_tokens=900,
+                                timeout_seconds=ui_settings["timeout_seconds"],
+                                retries=ui_settings["retries"],
+                            )
+
+                        data = parse_json_loose(raw)
+                        feedback = FinalFeedback.model_validate(data)
+                        st.session_state["final_feedback_json"] = feedback.model_dump()
+
+                    except Exception as exc:
+                        st.error(f"Could not generate feedback JSON. Error: {exc}")
+
+        if "final_feedback_json" in st.session_state:
+            st.json(st.session_state["final_feedback_json"])
 
     # Store inputs in session state for the upcoming multi-turn chat logic.
     st.session_state["role"] = role
