@@ -7,18 +7,18 @@ from src.logging_setup import setup_logging
 from src.llm_client import LLMClient
 from src.prompts import (
     PROMPT_STRATEGIES,
-    system_prompt_app_critic,
     system_prompt_final_feedback_text,
     system_prompt_json_only,
-    user_prompt_app_critic,
     user_prompt_final_feedback_json_from_history,
     user_prompt_final_feedback_text,
     user_prompt_first_question,
+    user_prompt_interview_plan_json,
     user_prompt_next_question,
 )
 from src.guards import rate_limit_ok, validate_inputs
 from src.pricing import estimate_call_cost_usd
 from src.interview_state import InterviewSession, Turn
+from src.schemas import InterviewPlan
 from src.json_utils import parse_json_loose
 from src.schemas import FinalFeedback
 
@@ -147,8 +147,6 @@ def render_sidebar(settings: dict) -> dict:
         help="Controls the interviewer tone.",
     )
 
-    st.sidebar.markdown("---")
-    st.sidebar.caption("Security note: never paste secrets into the chat.")
 
     return {
         "model": model,
@@ -260,6 +258,74 @@ def main() -> None:
     except Exception:
         pass
 
+    st.sidebar.caption("Security note: never paste secrets into the chat.")
+
+    st.markdown("---")
+    st.header("Interview plan (JSON)")
+
+    plan_disabled = not ui_settings["openai_api_key_present"]
+    if st.button("Generate interview plan (JSON)", disabled=plan_disabled):
+        guard = validate_inputs(role, focus_areas, job_description)
+        if not guard.allowed:
+            st.warning(guard.user_message)
+        else:
+            ok, msg = rate_limit_ok(timestamps=st.session_state["call_timestamps"])
+            if not ok:
+                st.warning(msg)
+            else:
+                try:
+                    client = LLMClient(api_key=settings["OPENAI_API_KEY"])
+                    system_prompt = system_prompt_json_only()
+                    user_prompt = user_prompt_interview_plan_json(
+                        role=role,
+                        focus_areas=focus_areas,
+                        difficulty=ui_settings["difficulty"],
+                        strategy_name=ui_settings["prompt_strategy"],
+                        persona=ui_settings["persona"],
+                    )
+
+                    with st.spinner("Generating interview plan (JSON)..."):  # type: ignore[call-arg]
+                        raw = client.generate_text(
+                            model=ui_settings["model"],
+                            system_prompt=system_prompt,
+                            user_prompt=user_prompt,
+                            temperature=0.2,
+                            top_p=1.0,
+                            presence_penalty=0.0,
+                            frequency_penalty=0.0,
+                            max_output_tokens=650,
+                            timeout_seconds=ui_settings.get("timeout_seconds", 30.0),
+                            retries=ui_settings.get("retries", 2),
+                        )
+
+                    data = parse_json_loose(raw)
+                    plan = InterviewPlan.model_validate(data).model_dump()
+
+                    # Keep the plan aligned with the guided interview length (5 questions).
+                    plan["total_questions"] = 5
+
+                    st.session_state["interview_plan_json"] = plan
+
+                except Exception as exc:
+                    st.error(f"Could not generate interview plan JSON. Error: {exc}")
+
+    if "interview_plan_json" in st.session_state:
+        plan_obj = st.session_state["interview_plan_json"]
+        plan_text = json.dumps(plan_obj, ensure_ascii=False, indent=2)
+
+        st.download_button(
+            label="Download interview_plan.json",
+            data=plan_text,
+            file_name="interview_plan.json",
+            mime="application/json",
+        )
+
+        st.markdown("Copy-ready JSON:")
+        st.code(plan_text, language="json")
+
+        st.markdown("Preview:")
+        st.json(plan_obj)
+
     st.markdown("---")
 
     # Initialize rate limiting state for this browser session.
@@ -275,7 +341,7 @@ def main() -> None:
     # Rate-limit indicator
     now_ts = time.time()
     recent_calls = [t for t in st.session_state["call_timestamps"] if now_ts - t <= 60]
-    st.caption(f"Rate limit: {len(recent_calls)}/6 calls in the last 60 seconds.")
+    st.caption(f"Rate limit: {len(recent_calls)}/10 calls in the last 60 seconds.")
 
     st.header("Mock interview (guided)")
 
@@ -328,28 +394,40 @@ def main() -> None:
                     except Exception as exc:
                         st.error(f"Could not start interview. Error: {exc}")
 
-    # Current question + answer input
+    # --- Guided interview: current question + answer + actions (FORM) ---
     if session.active and session.turns:
         current_q = session.turns[-1].question
         st.subheader("Current question")
         st.write(current_q)
 
-        current_answer = st.text_area(
-            "Your answer",
-            value=session.turns[-1].answer,
-            height=180,
-            max_chars=3000,
-            help="Write your answer, then click Next question or End interview.",
-        )
-        session.turns[-1].answer = current_answer
+        turn_number = len(session.turns)  # 1-based
+        answer_key = f"answer_turn_{turn_number}"
 
-    with next_col:
-        next_disabled = (not ui_settings["openai_api_key_present"]) or (not session.active) or (not session.turns)
-        if st.button("Next question", disabled=next_disabled):
-            if session.is_complete():
-                st.warning("You have reached the maximum number of questions. Please end the interview.")
-            elif not session.turns[-1].answer.strip():
-                st.warning("Please write an answer before moving to the next question.")
+        if answer_key not in st.session_state:
+            st.session_state[answer_key] = session.turns[-1].answer
+
+        with st.form(key=f"answer_form_turn_{turn_number}", clear_on_submit=False):
+            st.text_area(
+                "Your answer",
+                key=answer_key,
+                height=180,
+                max_chars=3000,
+                help="Write your answer, then click Next question or End interview.",
+            )
+
+            col_left, col_spacer, col_right = st.columns([2, 5, 2])
+            with col_left:
+                submit_next = st.form_submit_button("Next question")
+            with col_right:
+                submit_end = st.form_submit_button("End interview & get feedback")
+
+        # Handle submit actions (exactly one will be True per submit)
+        if submit_next or submit_end:
+            current_answer = (st.session_state.get(answer_key, "") or "").strip()
+            session.turns[-1].answer = current_answer
+
+            if not current_answer:
+                st.warning("Please write an answer before continuing.")
             else:
                 ok, msg = rate_limit_ok(timestamps=st.session_state["call_timestamps"])
                 if not ok:
@@ -357,109 +435,98 @@ def main() -> None:
                 else:
                     try:
                         client = LLMClient(api_key=settings["OPENAI_API_KEY"])
-                        strategy_fn = PROMPT_STRATEGIES[ui_settings["prompt_strategy"]]
-                        system_prompt = strategy_fn(ui_settings["persona"])
-
                         history = [{"question": t.question, "answer": t.answer} for t in session.turns]
 
-                        user_prompt = user_prompt_next_question(
-                            role=role,
-                            focus_areas=focus_areas,
-                            difficulty=ui_settings["difficulty"],
-                            job_description=job_description,
-                            response_style=ui_settings["response_style"],
-                            history=history,
-                        )
+                        if submit_next:
+                            if session.is_complete():
+                                st.warning("You have reached the maximum number of questions. Please end the interview.")
+                            else:
+                                strategy_fn = PROMPT_STRATEGIES[ui_settings["prompt_strategy"]]
+                                system_prompt = strategy_fn(ui_settings["persona"])
 
-                        with st.spinner("Generating next question..."):  # type: ignore[call-arg]
-                            next_q = client.generate_text(
-                                model=ui_settings["model"],
-                                system_prompt=system_prompt,
-                                user_prompt=user_prompt,
-                                temperature=ui_settings["temperature"],
-                                top_p=ui_settings.get("top_p", 1.0),
-                                presence_penalty=ui_settings.get("presence_penalty", 0.0),
-                                frequency_penalty=ui_settings.get("frequency_penalty", 0.0),
-                                max_output_tokens=ui_settings.get("max_output_tokens", 250),
-                                timeout_seconds=ui_settings.get("timeout_seconds", 30.0),
-                                retries=ui_settings.get("retries", 2),
+                                user_prompt = user_prompt_next_question(
+                                    role=role,
+                                    focus_areas=focus_areas,
+                                    difficulty=ui_settings["difficulty"],
+                                    job_description=job_description,
+                                    response_style=ui_settings["response_style"],
+                                    history=history,
+                                )
+
+                                with st.spinner("Generating next question..."):  # type: ignore[call-arg]
+                                    next_q = client.generate_text(
+                                        model=ui_settings["model"],
+                                        system_prompt=system_prompt,
+                                        user_prompt=user_prompt,
+                                        temperature=ui_settings["temperature"],
+                                        top_p=ui_settings.get("top_p", 1.0),
+                                        presence_penalty=ui_settings.get("presence_penalty", 0.0),
+                                        frequency_penalty=ui_settings.get("frequency_penalty", 0.0),
+                                        max_output_tokens=ui_settings.get("max_output_tokens", 250),
+                                        timeout_seconds=ui_settings.get("timeout_seconds", 30.0),
+                                        retries=ui_settings.get("retries", 2),
+                                    )
+
+                                session.turns.append(Turn(question=next_q, answer=""))
+
+                        if submit_end:
+                            system_prompt = system_prompt_final_feedback_text()
+                            user_prompt = user_prompt_final_feedback_text(
+                                role=role,
+                                difficulty=ui_settings["difficulty"],
+                                focus_areas=focus_areas,
+                                job_description=job_description,
+                                history=history,
                             )
 
-                        session.turns.append(Turn(question=next_q, answer=""))
+                            with st.spinner("Generating final feedback..."):  # type: ignore[call-arg]
+                                feedback_text = client.generate_text(
+                                    model=ui_settings["model"],
+                                    system_prompt=system_prompt,
+                                    user_prompt=user_prompt,
+                                    temperature=0.2,
+                                    top_p=1.0,
+                                    presence_penalty=0.0,
+                                    frequency_penalty=0.0,
+                                    max_output_tokens=900,
+                                    timeout_seconds=ui_settings.get("timeout_seconds", 30.0),
+                                    retries=ui_settings.get("retries", 2),
+                                )
+
+                            json_system = system_prompt_json_only()
+                            json_user = user_prompt_final_feedback_json_from_history(
+                                role=role,
+                                difficulty=ui_settings["difficulty"],
+                                focus_areas=focus_areas,
+                                job_description=job_description,
+                                history=history,
+                            )
+
+                            with st.spinner("Generating final feedback (JSON)..."):  # type: ignore[call-arg]
+                                raw_json = client.generate_text(
+                                    model=ui_settings["model"],
+                                    system_prompt=json_system,
+                                    user_prompt=json_user,
+                                    temperature=0.2,
+                                    top_p=1.0,
+                                    presence_penalty=0.0,
+                                    frequency_penalty=0.0,
+                                    max_output_tokens=900,
+                                    timeout_seconds=ui_settings.get("timeout_seconds", 30.0),
+                                    retries=ui_settings.get("retries", 2),
+                                )
+
+                            data = parse_json_loose(raw_json)
+                            feedback_json = FinalFeedback.model_validate(data).model_dump()
+
+                            st.session_state["final_feedback_text"] = feedback_text
+                            st.session_state["final_feedback_json"] = feedback_json
+                            session.active = False
+
                     except Exception as exc:
-                        st.error(f"Could not generate next question. Error: {exc}")
+                        st.error(f"Interview action failed. Error: {exc}")
 
-    with end_col:
-        end_disabled = (not ui_settings["openai_api_key_present"]) or (not session.active) or (not session.turns)
-        if st.button("End interview & get feedback", disabled=end_disabled):
-            if not session.turns[-1].answer.strip():
-                st.warning("Please write an answer for the current question before ending.")
-            else:
-                ok, msg = rate_limit_ok(timestamps=st.session_state["call_timestamps"])
-                if not ok:
-                    st.warning(msg)
-                else:
-                    try:
-                        client = LLMClient(api_key=settings["OPENAI_API_KEY"])
-
-                        history = [{"question": t.question, "answer": t.answer} for t in session.turns]
-
-                        system_prompt = system_prompt_final_feedback_text()
-                        user_prompt = user_prompt_final_feedback_text(
-                            role=role,
-                            difficulty=ui_settings["difficulty"],
-                            focus_areas=focus_areas,
-                            job_description=job_description,
-                            history=history,
-                        )
-
-                        with st.spinner("Generating final feedback..."):  # type: ignore[call-arg]
-                            feedback_text = client.generate_text(
-                                model=ui_settings["model"],
-                                system_prompt=system_prompt,
-                                user_prompt=user_prompt,
-                                temperature=0.2,
-                                top_p=1.0,
-                                presence_penalty=0.0,
-                                frequency_penalty=0.0,
-                                max_output_tokens=900,
-                                timeout_seconds=ui_settings.get("timeout_seconds", 30.0),
-                                retries=ui_settings.get("retries", 2),
-                            )
-
-                        # Also generate structured JSON feedback (reuses the Medium schema).
-                        json_system = system_prompt_json_only()
-                        json_user = user_prompt_final_feedback_json_from_history(
-                            role=role,
-                            difficulty=ui_settings["difficulty"],
-                            focus_areas=focus_areas,
-                            job_description=job_description,
-                            history=history,
-                        )
-
-                        with st.spinner("Generating final feedback (JSON)..."):  # type: ignore[call-arg]
-                            raw_json = client.generate_text(
-                                model=ui_settings["model"],
-                                system_prompt=json_system,
-                                user_prompt=json_user,
-                                temperature=0.2,
-                                top_p=1.0,
-                                presence_penalty=0.0,
-                                frequency_penalty=0.0,
-                                max_output_tokens=900,
-                                timeout_seconds=ui_settings.get("timeout_seconds", 30.0),
-                                retries=ui_settings.get("retries", 2),
-                            )
-
-                        data = parse_json_loose(raw_json)
-                        feedback_json = FinalFeedback.model_validate(data).model_dump()
-
-                        st.session_state["final_feedback_text"] = feedback_text
-                        st.session_state["final_feedback_json"] = feedback_json
-                        session.active = False
-                    except Exception as exc:
-                        st.error(f"Could not generate final feedback. Error: {exc}")
-
+    # Transcript + outputs (must be inside main())
     if session.turns:
         st.markdown("---")
         st.subheader("Transcript")

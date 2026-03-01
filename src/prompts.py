@@ -232,7 +232,7 @@ def user_prompt_interview_plan_json(
         '  "role": string,\n'
         '  "difficulty": "Easy" | "Medium" | "Hard",\n'
         '  "focus_areas": [string, ...],\n'
-        '  "total_questions": integer (1-20),\n'
+        '  "total_questions": integer,\n'
         '  "strategy": string,\n'
         '  "persona": string,\n'
         '  "rubric_criteria": [string, ...],\n'
@@ -242,6 +242,7 @@ def user_prompt_interview_plan_json(
         "- focus_areas must be a clean list derived from the raw text.\n"
         "- rubric_criteria must be practical for Software & AI Engineering interviews.\n"
         "- tips must be actionable.\n"
+        "- total_questions MUST be exactly 5.\n"
     )
 
 

@@ -57,7 +57,7 @@ def validate_inputs(role: str, focus_areas: str, job_description: str) -> GuardR
 def rate_limit_ok(
     *,
     timestamps: list[float],
-    max_calls: int = 6,
+    max_calls: int = 10,
     window_seconds: int = 60,
 ) -> tuple[bool, str]:
     """
