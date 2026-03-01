@@ -306,6 +306,8 @@ def user_prompt_final_feedback_json(
     *,
     role: str,
     difficulty: str,
+    focus_areas: str,
+    job_description: str,
     question: str,
     answer: str,
 ) -> str:
@@ -317,6 +319,8 @@ def user_prompt_final_feedback_json(
         "Rules: output JSON only.\n\n"
         f"Role: {role}\n"
         f"Difficulty: {difficulty}\n"
+        f"Focus areas (raw text): {focus_areas}\n"
+        f"Job description (optional): {job_description}\n"
         f"Question: {question}\n"
         f"Candidate answer: {answer}\n\n"
         "JSON schema:\n"
@@ -340,5 +344,6 @@ def user_prompt_final_feedback_json(
         "Constraints:\n"
         "- Be honest but constructive.\n"
         "- Use scores that match the written critique.\n"
+        "- Align feedback with the focus areas and job description when provided.\n"
         "- improved_answer_outline must be concise bullets.\n"
     )

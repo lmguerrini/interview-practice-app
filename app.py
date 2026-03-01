@@ -444,6 +444,8 @@ def main() -> None:
                         user_prompt = user_prompt_final_feedback_json(
                             role=role,
                             difficulty=ui_settings["difficulty"],
+                            focus_areas=focus_areas,
+                            job_description=job_description,
                             question=st.session_state["first_question"],
                             answer=answer_text,
                         )
