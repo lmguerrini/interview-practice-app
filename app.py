@@ -231,11 +231,14 @@ def main() -> None:
             job_description=job_description,
             response_style=ui_settings["response_style"],
         )
+
         estimate = estimate_call_cost_usd(
             model=ui_settings["model"],
             system_prompt=system_prompt_preview,
             user_prompt=user_prompt_preview,
             output_tokens=ui_settings["max_output_tokens"],
+            pricing_input_per_1m=settings.get("OPENAI_PRICING_INPUT_PER_1M", {}),
+            pricing_output_per_1m=settings.get("OPENAI_PRICING_OUTPUT_PER_1M", {}),
         )
 
         st.sidebar.markdown("---")
@@ -246,7 +249,6 @@ def main() -> None:
         st.sidebar.write(f"Estimated cost: **${estimate.estimated_cost_usd:.6f}**")
         st.sidebar.caption(estimate.note)
     except Exception:
-        # Cost estimate should never break the app.
         pass
 
     st.markdown("---")
