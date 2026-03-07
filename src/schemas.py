@@ -8,6 +8,11 @@ from pydantic import BaseModel, Field
 Difficulty = Literal["Easy", "Medium", "Hard"]
 
 
+class ExtractedFocusAreas(BaseModel):
+    focus_areas: list[str] = Field(..., description="Clean list of extracted focus areas.")
+    summary: str = Field(..., description="Short summary of what the job description emphasizes.")
+
+
 class InterviewPlan(BaseModel):
     role: str = Field(..., description="Target role being interviewed for.")
     difficulty: Difficulty
