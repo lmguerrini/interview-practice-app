@@ -9,6 +9,7 @@ from src.prompts import (
     PROMPT_STRATEGIES,
     system_prompt_final_feedback_text,
     system_prompt_json_only,
+    user_prompt_extract_focus_areas_json,
     user_prompt_final_feedback_json_from_history,
     user_prompt_final_feedback_text,
     user_prompt_first_question,
@@ -18,9 +19,8 @@ from src.prompts import (
 from src.guards import rate_limit_ok, validate_inputs
 from src.pricing import estimate_call_cost_usd
 from src.interview_state import InterviewSession, Turn
-from src.schemas import InterviewPlan
+from src.schemas import ExtractedFocusAreas, FinalFeedback, InterviewPlan
 from src.json_utils import parse_json_loose
-from src.schemas import FinalFeedback
 
 
 def render_sidebar(settings: dict) -> dict:
@@ -208,11 +208,20 @@ def main() -> None:
             max_chars=80,
         )
 
-        st.subheader("Focus areas")
+        # Apply pending updates before the widget is created in this run.
+        if "pending_focus_areas_input" in st.session_state:
+            st.session_state["focus_areas_input"] = st.session_state.pop("pending_focus_areas_input")
+
+        if "pending_focus_areas_summary" in st.session_state:
+            st.session_state["focus_areas_summary"] = st.session_state.pop("pending_focus_areas_summary")
+
+        if "focus_areas_input" not in st.session_state:
+            st.session_state["focus_areas_input"] = "Python, APIs, LLM prompting, debugging, system design basics"
+
         focus_areas = st.text_area(
-            "Skills / topics to practice",
-            value="Python, APIs, LLM prompting, debugging, system design basics",
-            help="Comma-separated topics are fine. Keep it concise.",
+            "Focus areas",
+            key="focus_areas_input",
+            help="Comma-separated areas to practice. You can type them manually or extract them from the job description.",
             height=120,
             max_chars=500,
         )
@@ -226,6 +235,59 @@ def main() -> None:
             height=220,
             max_chars=3000,
         )
+
+    extract_disabled = (not ui_settings["openai_api_key_present"]) or (not job_description.strip())
+
+    if st.button("Extract focus areas from job description", disabled=extract_disabled):
+        if not job_description.strip():
+            st.warning("Please add a job description before extracting focus areas.")
+        else:
+            ok, msg = rate_limit_ok(timestamps=st.session_state["call_timestamps"])
+            if not ok:
+                st.warning(msg)
+            else:
+                try:
+                    client = LLMClient(api_key=settings["OPENAI_API_KEY"])
+                    system_prompt = system_prompt_json_only()
+                    user_prompt = user_prompt_extract_focus_areas_json(
+                        role=role,
+                        job_description=job_description,
+                    )
+
+                    with st.spinner("Extracting focus areas..."):  # type: ignore[call-arg]
+                        raw = client.generate_text(
+                            model=ui_settings["model"],
+                            system_prompt=system_prompt,
+                            user_prompt=user_prompt,
+                            temperature=0.2,
+                            top_p=1.0,
+                            presence_penalty=0.0,
+                            frequency_penalty=0.0,
+                            max_output_tokens=350,
+                            timeout_seconds=ui_settings.get("timeout_seconds", 30.0),
+                            retries=ui_settings.get("retries", 2),
+                            response_format={"type": "json_object"},
+                        )
+
+                    data = parse_json_loose(raw)
+                    extracted = ExtractedFocusAreas.model_validate(data)
+
+                    st.session_state["pending_focus_areas_input"] = ", ".join(extracted.focus_areas)
+                    st.session_state["pending_focus_areas_summary"] = extracted.summary
+                    st.rerun()
+
+                except Exception as exc:
+                    st.error(
+                        "Could not extract focus areas from the job description. "
+                        f"Reason: {exc}"
+                    )
+
+    # Auto-suggestion path: if focus areas are empty, gently prompt the user.
+    if job_description.strip() and not st.session_state.get("focus_areas_input", "").strip():
+        st.info("Focus areas are empty. You can extract them automatically from the job description.")
+
+    if "focus_areas_summary" in st.session_state:
+        st.caption(f"Extracted summary: {st.session_state['focus_areas_summary']}")
 
     # --- Cost estimate (sidebar, always visible) ---
     try:

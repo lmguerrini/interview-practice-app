@@ -496,3 +496,24 @@ def user_prompt_app_critic(
         "<<<NEXT_IMPROVEMENTS>>>\n"
         "- ... (5 bullets)\n"
     )
+
+
+def user_prompt_extract_focus_areas_json(*, role: str, job_description: str) -> str:
+    """
+    Ask for extracted focus areas from a job description as JSON.
+    """
+    return (
+        "Extract the most relevant interview focus areas from the job description and return JSON only.\n\n"
+        f"Role: {role}\n"
+        f"Job description:\n{job_description}\n\n"
+        "JSON schema:\n"
+        "{\n"
+        '  "focus_areas": [string, ...],\n'
+        '  "summary": string\n'
+        "}\n"
+        "Constraints:\n"
+        "- focus_areas must be concise and practical.\n"
+        "- focus_areas should be relevant for interview preparation.\n"
+        "- Prefer technical and role-relevant areas over generic soft wording.\n"
+        "- Return 4 to 8 focus areas.\n"
+    )
