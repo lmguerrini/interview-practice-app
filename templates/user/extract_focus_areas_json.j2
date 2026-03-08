@@ -1,0 +1,24 @@
+{# Extract role + concise focus areas from a job description #}
+Extract the most relevant role title and interview focus areas from the job description and return JSON only.
+
+Current role field (may be empty or generic): {{ role }}
+
+Job description:
+{{ job_description }}
+
+JSON schema:
+{
+  "role": string,
+  "focus_areas": [string, ...],
+  "summary": string
+}
+
+Constraints:
+- role must be a short role title such as "AI Engineer", "Backend Engineer", "ML Engineer", or similar.
+- focus_areas must be short topic labels, not full task descriptions.
+- Each focus area should be 2 to 5 words maximum.
+- Prefer concise noun phrases such as:
+  "RAG pipelines", "Vector databases", "Prompt engineering", "Model evaluation".
+- Do NOT start items with verbs like "Design", "Build", "Implement", "Develop", or "Collaborate".
+- Return 4 to 6 focus areas only.
+- summary must be one short sentence summarizing the main emphasis of the role.

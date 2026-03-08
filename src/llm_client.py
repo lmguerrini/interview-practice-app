@@ -38,6 +38,7 @@ class LLMClient:
         timeout_seconds: float = 30.0,
         retries: int = 2,
         retry_sleep_seconds: float = 1.25,
+        response_format: Optional[dict] = None,
     ) -> str:
         """
         Make a single OpenAI call and return the final assistant text.
@@ -65,6 +66,10 @@ class LLMClient:
                 )
                 messages: list[ChatCompletionMessageParam] = [system_msg, user_msg]
 
+                extra_kwargs = {}
+                if response_format is not None:
+                    extra_kwargs["response_format"] = response_format
+
                 response = self._client.chat.completions.create(
                     model=model,
                     temperature=temperature,
@@ -74,6 +79,7 @@ class LLMClient:
                     max_tokens=max_output_tokens,
                     timeout=timeout_seconds,
                     messages=messages,
+                    **extra_kwargs,
                 )
 
                 text = (response.choices[0].message.content or "").strip()

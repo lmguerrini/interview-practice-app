@@ -1,0 +1,26 @@
+Create an interview plan as a JSON object.
+Rules: output JSON only.
+
+Role: {{ role }}
+Difficulty: {{ difficulty }}
+Focus areas (raw text): {{ focus_areas }}
+Prompt strategy name: {{ strategy_name }}
+Interviewer persona: {{ persona }}
+
+JSON schema (keys and expectations):
+{
+  "role": string,
+  "difficulty": "Easy" | "Medium" | "Hard",
+  "focus_areas": [string, ...],
+  "total_questions": integer,
+  "strategy": string,
+  "persona": string,
+  "rubric_criteria": [string, ...],
+  "tips": [string, ...]
+}
+
+Constraints:
+- focus_areas must be a clean list derived from the raw text.
+- rubric_criteria must be practical for Software & AI Engineering interviews.
+- tips must be actionable.
+- total_questions MUST be exactly 5.
