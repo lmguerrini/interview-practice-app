@@ -66,9 +66,9 @@ class LLMClient:
                 )
                 messages: list[ChatCompletionMessageParam] = [system_msg, user_msg]
 
-                kwargs = {}
+                extra_kwargs = {}
                 if response_format is not None:
-                    kwargs["response_format"] = response_format
+                    extra_kwargs["response_format"] = response_format
 
                 response = self._client.chat.completions.create(
                     model=model,
@@ -79,7 +79,7 @@ class LLMClient:
                     max_tokens=max_output_tokens,
                     timeout=timeout_seconds,
                     messages=messages,
-                    **kwargs,
+                    **extra_kwargs,
                 )
 
                 text = (response.choices[0].message.content or "").strip()

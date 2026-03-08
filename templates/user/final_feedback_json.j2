@@ -1,0 +1,34 @@
+Evaluate the candidate answer and return final feedback as JSON.
+Rules: output JSON only.
+
+Role: {{ role }}
+Difficulty: {{ difficulty }}
+Focus areas (raw text): {{ focus_areas }}
+Job description (optional): {{ job_description }}
+Question: {{ question }}
+Candidate answer: {{ answer }}
+
+JSON schema:
+{
+  "role": string,
+  "difficulty": "Easy" | "Medium" | "Hard",
+  "question": string,
+  "answer_summary": string,
+  "scores": {
+    "clarity": 1-10,
+    "correctness": 1-10,
+    "depth": 1-10,
+    "structure": 1-10,
+    "communication": 1-10
+  },
+  "strengths": [string, ...],
+  "weaknesses": [string, ...],
+  "improved_answer_outline": [string, ...],
+  "next_steps": [string, ...]
+}
+
+Constraints:
+- Be honest but constructive.
+- Use scores that match the written critique.
+- Align feedback with the focus areas and job description when provided.
+- improved_answer_outline must be concise bullets.

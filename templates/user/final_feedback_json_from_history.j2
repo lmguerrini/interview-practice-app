@@ -1,0 +1,35 @@
+Evaluate the candidate performance across the full mock interview and return final feedback as JSON.
+Rules: output JSON only.
+
+Role: {{ role }}
+Difficulty: {{ difficulty }}
+Focus areas (raw text): {{ focus_areas }}
+Job description (optional): {{ job_description }}
+
+Interview transcript:
+{{ history_block }}
+
+JSON schema:
+{
+  "role": string,
+  "difficulty": "Easy" | "Medium" | "Hard",
+  "question": string,
+  "answer_summary": string,
+  "scores": {
+    "clarity": 1-10,
+    "correctness": 1-10,
+    "depth": 1-10,
+    "structure": 1-10,
+    "communication": 1-10
+  },
+  "strengths": [string, ...],
+  "weaknesses": [string, ...],
+  "improved_answer_outline": [string, ...],
+  "next_steps": [string, ...]
+}
+
+Constraints:
+- Use "Mock interview (5 questions)" as the question field value.
+- Be honest but constructive.
+- Ensure scores match the critique.
+- improved_answer_outline must be concise bullets.

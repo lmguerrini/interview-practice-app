@@ -1,0 +1,8 @@
+{% include "system/common_rules.j2" %}
+
+{# Internal verification before producing the final question #}
+Before producing the question, silently verify these conditions:
+- The question matches the requested role.
+- The question matches the requested difficulty.
+- The question targets at least one focus area.
+If a condition is not satisfied, silently revise and produce a better question.

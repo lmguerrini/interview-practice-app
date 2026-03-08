@@ -1,10 +1,15 @@
 import json
 import time
+
 import streamlit as st
 
 from src.config import load_settings
-from src.logging_setup import setup_logging
+from src.guards import rate_limit_ok, validate_inputs
+from src.interview_state import InterviewSession, Turn
+from src.json_utils import parse_json_loose
 from src.llm_client import LLMClient
+from src.logging_setup import setup_logging
+from src.pricing import estimate_call_cost_usd
 from src.prompts import (
     PROMPT_STRATEGIES,
     system_prompt_final_feedback_text,
@@ -16,19 +21,12 @@ from src.prompts import (
     user_prompt_interview_plan_json,
     user_prompt_next_question,
 )
-from src.guards import rate_limit_ok, validate_inputs
-from src.pricing import estimate_call_cost_usd
-from src.interview_state import InterviewSession, Turn
 from src.schemas import ExtractedFocusAreas, FinalFeedback, InterviewPlan
-from src.json_utils import parse_json_loose
 
 
 def render_sidebar(settings: dict) -> dict:
     """
     Render the sidebar controls and return the UI-selected settings.
-
-    Keeping this logic in a dedicated function makes the UI easier to evolve
-    when we add more model settings (temperature, top_p, penalties, etc.).
     """
     st.sidebar.title("Interview Practice App")
 
@@ -42,7 +40,7 @@ def render_sidebar(settings: dict) -> dict:
             "gpt-4o",
             "gpt-4o-mini",
         ],
-        index=4,  # Default to cost-effective
+        index=4,
         help="Pick one of the allowed models for this project.",
     )
 
@@ -147,7 +145,6 @@ def render_sidebar(settings: dict) -> dict:
         help="Controls the interviewer tone.",
     )
 
-
     return {
         "model": model,
         "temperature": temperature,
@@ -169,8 +166,6 @@ def render_sidebar(settings: dict) -> dict:
 def main() -> None:
     """
     Streamlit entry point.
-
-    The app builds an interview practice UI and calls the OpenAI API to generate questions.
     """
     setup_logging()
     settings = load_settings()
@@ -183,12 +178,19 @@ def main() -> None:
 
     ui_settings = render_sidebar(settings)
 
+    if "call_timestamps" not in st.session_state:
+        st.session_state["call_timestamps"] = []
+
+    if "interview_session" not in st.session_state:
+        st.session_state["interview_session"] = InterviewSession(active=False, max_questions=5)
+
+    session: InterviewSession = st.session_state["interview_session"]
+
     st.title("Interview Practice App")
     st.write(
         "Practice for Software & AI Engineering interviews using prompt strategies, safety guardrails, and tunable LLM settings."
     )
 
-    # Show API key status without revealing it.
     if ui_settings["openai_api_key_present"]:
         st.success("OpenAI API key detected (from environment).")
     else:
@@ -201,14 +203,20 @@ def main() -> None:
 
     with col1:
         st.subheader("Your target role")
+
+        if "pending_role_input" in st.session_state:
+            st.session_state["role_input"] = st.session_state.pop("pending_role_input")
+
+        if "role_input" not in st.session_state:
+            st.session_state["role_input"] = "AI Engineer"
+
         role = st.text_input(
             "Role title",
-            value="AI Engineer",
+            key="role_input",
             help="Examples: Backend Engineer, AI Engineer, ML Engineer, Software Engineer.",
             max_chars=80,
         )
 
-        # Apply pending updates before the widget is created in this run.
         if "pending_focus_areas_input" in st.session_state:
             st.session_state["focus_areas_input"] = st.session_state.pop("pending_focus_areas_input")
 
@@ -216,7 +224,7 @@ def main() -> None:
             st.session_state["focus_areas_summary"] = st.session_state.pop("pending_focus_areas_summary")
 
         if "focus_areas_input" not in st.session_state:
-            st.session_state["focus_areas_input"] = "Python, APIs, LLM prompting, debugging, system design basics"
+            st.session_state["focus_areas_input"] = ""
 
         focus_areas = st.text_area(
             "Focus areas",
@@ -236,11 +244,12 @@ def main() -> None:
             max_chars=3000,
         )
 
+    # --- Focus area extraction must appear immediately after the two input columns ---
     extract_disabled = (not ui_settings["openai_api_key_present"]) or (not job_description.strip())
 
-    if st.button("Extract focus areas from job description", disabled=extract_disabled):
+    if st.button("Extract role title and focus areas from job description", disabled=extract_disabled):
         if not job_description.strip():
-            st.warning("Please add a job description before extracting focus areas.")
+            st.warning("Please add a job description before extracting role title and focus areas.")
         else:
             ok, msg = rate_limit_ok(timestamps=st.session_state["call_timestamps"])
             if not ok:
@@ -254,7 +263,7 @@ def main() -> None:
                         job_description=job_description,
                     )
 
-                    with st.spinner("Extracting focus areas..."):  # type: ignore[call-arg]
+                    with st.spinner("Extracting role title and focus areas..."):  # type: ignore[call-arg]
                         raw = client.generate_text(
                             model=ui_settings["model"],
                             system_prompt=system_prompt,
@@ -272,19 +281,28 @@ def main() -> None:
                     data = parse_json_loose(raw)
                     extracted = ExtractedFocusAreas.model_validate(data)
 
-                    st.session_state["pending_focus_areas_input"] = ", ".join(extracted.focus_areas)
+                    cleaned_focus_areas = []
+                    for item in extracted.focus_areas:
+                        cleaned = (item or "").strip().lstrip("-•").strip()
+                        if cleaned:
+                            cleaned_focus_areas.append(cleaned)
+
+                    cleaned_focus_areas = cleaned_focus_areas[:6]
+
+                    st.session_state["pending_role_input"] = extracted.role.strip()
+                    st.session_state["pending_focus_areas_input"] = ", ".join(cleaned_focus_areas)
                     st.session_state["pending_focus_areas_summary"] = extracted.summary
                     st.rerun()
 
                 except Exception as exc:
                     st.error(
-                        "Could not extract focus areas from the job description. "
+                        "Could not extract role title and focus areas from the job description. "
                         f"Reason: {exc}"
                     )
 
-    # Auto-suggestion path: if focus areas are empty, gently prompt the user.
-    if job_description.strip() and not st.session_state.get("focus_areas_input", "").strip():
-        st.info("Focus areas are empty. You can extract them automatically from the job description.")
+    current_focus_value = (focus_areas or "").strip()
+    if job_description.strip() and not current_focus_value:
+        st.info("Focus areas are empty. You can extract them from the job description.")
 
     if "focus_areas_summary" in st.session_state:
         st.caption(f"Extracted summary: {st.session_state['focus_areas_summary']}")
@@ -358,14 +376,12 @@ def main() -> None:
                             max_output_tokens=650,
                             timeout_seconds=ui_settings.get("timeout_seconds", 30.0),
                             retries=ui_settings.get("retries", 2),
+                            response_format={"type": "json_object"},
                         )
 
                     data = parse_json_loose(raw)
                     plan = InterviewPlan.model_validate(data).model_dump()
-
-                    # Keep the plan aligned with the guided interview length (5 questions).
                     plan["total_questions"] = 5
-
                     st.session_state["interview_plan_json"] = plan
 
                 except Exception as exc:
@@ -390,16 +406,6 @@ def main() -> None:
 
     st.markdown("---")
 
-    # Initialize rate limiting state for this browser session.
-    if "call_timestamps" not in st.session_state:
-        st.session_state["call_timestamps"] = []
-
-    # Initialize guided interview session state.
-    if "interview_session" not in st.session_state:
-        st.session_state["interview_session"] = InterviewSession(active=False, max_questions=5)
-
-    session: InterviewSession = st.session_state["interview_session"]
-
     # Rate-limit indicator
     now_ts = time.time()
     recent_calls = [t for t in st.session_state["call_timestamps"] if now_ts - t <= 60]
@@ -408,61 +414,58 @@ def main() -> None:
     st.header("Mock interview (guided)")
 
     start_disabled = not ui_settings["openai_api_key_present"]
-    start_col, next_col, end_col = st.columns(3)
-
-    with start_col:
-        if st.button("Start interview", type="primary", disabled=start_disabled):
-            guard = validate_inputs(role, focus_areas, job_description)
-            if not guard.allowed:
-                st.warning(guard.user_message)
+    if st.button("Start interview", type="primary", disabled=start_disabled):
+        guard = validate_inputs(role, focus_areas, job_description)
+        if not guard.allowed:
+            st.warning(guard.user_message)
+        else:
+            ok, msg = rate_limit_ok(timestamps=st.session_state["call_timestamps"])
+            if not ok:
+                st.warning(msg)
             else:
-                ok, msg = rate_limit_ok(timestamps=st.session_state["call_timestamps"])
-                if not ok:
-                    st.warning(msg)
-                else:
-                    try:
-                        session.active = True
-                        session.max_questions = 5
-                        session.turns = []
-                        st.session_state.pop("final_feedback_text", None)
+                try:
+                    session.active = True
+                    session.max_questions = 5
+                    session.turns = []
+                    st.session_state.pop("final_feedback_text", None)
+                    st.session_state.pop("final_feedback_json", None)
 
-                        client = LLMClient(api_key=settings["OPENAI_API_KEY"])
-                        strategy_fn = PROMPT_STRATEGIES[ui_settings["prompt_strategy"]]
-                        system_prompt = strategy_fn(ui_settings["persona"])
+                    client = LLMClient(api_key=settings["OPENAI_API_KEY"])
+                    strategy_fn = PROMPT_STRATEGIES[ui_settings["prompt_strategy"]]
+                    system_prompt = strategy_fn(ui_settings["persona"])
 
-                        user_prompt = user_prompt_first_question(
-                            role=role,
-                            focus_areas=focus_areas,
-                            difficulty=ui_settings["difficulty"],
-                            job_description=job_description,
-                            response_style=ui_settings["response_style"],
+                    user_prompt = user_prompt_first_question(
+                        role=role,
+                        focus_areas=focus_areas,
+                        difficulty=ui_settings["difficulty"],
+                        job_description=job_description,
+                        response_style=ui_settings["response_style"],
+                    )
+
+                    with st.spinner("Starting interview..."):  # type: ignore[call-arg]
+                        first_q = client.generate_text(
+                            model=ui_settings["model"],
+                            system_prompt=system_prompt,
+                            user_prompt=user_prompt,
+                            temperature=ui_settings["temperature"],
+                            top_p=ui_settings.get("top_p", 1.0),
+                            presence_penalty=ui_settings.get("presence_penalty", 0.0),
+                            frequency_penalty=ui_settings.get("frequency_penalty", 0.0),
+                            max_output_tokens=ui_settings.get("max_output_tokens", 250),
+                            timeout_seconds=ui_settings.get("timeout_seconds", 30.0),
+                            retries=ui_settings.get("retries", 2),
                         )
 
-                        with st.spinner("Starting interview..."):  # type: ignore[call-arg]
-                            first_q = client.generate_text(
-                                model=ui_settings["model"],
-                                system_prompt=system_prompt,
-                                user_prompt=user_prompt,
-                                temperature=ui_settings["temperature"],
-                                top_p=ui_settings.get("top_p", 1.0),
-                                presence_penalty=ui_settings.get("presence_penalty", 0.0),
-                                frequency_penalty=ui_settings.get("frequency_penalty", 0.0),
-                                max_output_tokens=ui_settings.get("max_output_tokens", 250),
-                                timeout_seconds=ui_settings.get("timeout_seconds", 30.0),
-                                retries=ui_settings.get("retries", 2),
-                            )
+                    session.turns.append(Turn(question=first_q, answer=""))
+                except Exception as exc:
+                    st.error(f"Could not start interview. Error: {exc}")
 
-                        session.turns.append(Turn(question=first_q, answer=""))
-                    except Exception as exc:
-                        st.error(f"Could not start interview. Error: {exc}")
-
-    # --- Guided interview: current question + answer + actions (FORM) ---
     if session.active and session.turns:
         current_q = session.turns[-1].question
         st.subheader("Current question")
         st.write(current_q)
 
-        turn_number = len(session.turns)  # 1-based
+        turn_number = len(session.turns)
         answer_key = f"answer_turn_{turn_number}"
 
         if answer_key not in st.session_state:
@@ -483,7 +486,6 @@ def main() -> None:
             with col_right:
                 submit_end = st.form_submit_button("End interview & get feedback")
 
-        # Handle submit actions (exactly one will be True per submit)
         if submit_next or submit_end:
             current_answer = (st.session_state.get(answer_key, "") or "").strip()
             session.turns[-1].answer = current_answer
@@ -576,6 +578,7 @@ def main() -> None:
                                     max_output_tokens=900,
                                     timeout_seconds=ui_settings.get("timeout_seconds", 30.0),
                                     retries=ui_settings.get("retries", 2),
+                                    response_format={"type": "json_object"},
                                 )
 
                             data = parse_json_loose(raw_json)
@@ -588,7 +591,6 @@ def main() -> None:
                     except Exception as exc:
                         st.error(f"Interview action failed. Error: {exc}")
 
-    # Transcript + outputs (must be inside main())
     if session.turns:
         st.markdown("---")
         st.subheader("Transcript")
@@ -623,11 +625,11 @@ def main() -> None:
         st.markdown("Preview:")
         st.json(final_json_obj)
 
-    # Store inputs in session state for the upcoming multi-turn chat logic.
     st.session_state["role"] = role
     st.session_state["focus_areas"] = focus_areas
     st.session_state["job_description"] = job_description
     st.session_state["ui_settings"] = ui_settings
+
 
 if __name__ == "__main__":
     main()
