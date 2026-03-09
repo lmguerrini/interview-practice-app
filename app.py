@@ -22,6 +22,11 @@ from src.prompts import (
     user_prompt_next_question,
 )
 from src.schemas import ExtractedFocusAreas, FinalFeedback, InterviewPlan
+from src.ux_utils import (
+    format_error_message,
+    get_interview_config_signature,
+    reset_interview,
+)
 
 
 def render_sidebar(settings: dict) -> dict:
@@ -295,10 +300,7 @@ def main() -> None:
                     st.rerun()
 
                 except Exception as exc:
-                    st.error(
-                        "Could not extract role title and focus areas from the job description. "
-                        f"Reason: {exc}"
-                    )
+                    st.error(format_error_message(exc))
 
     current_focus_value = (focus_areas or "").strip()
     if job_description.strip() and not current_focus_value:
@@ -385,7 +387,7 @@ def main() -> None:
                     st.session_state["interview_plan_json"] = plan
 
                 except Exception as exc:
-                    st.error(f"Could not generate interview plan JSON. Error: {exc}")
+                    st.error(format_error_message(exc))
 
     if "interview_plan_json" in st.session_state:
         plan_obj = st.session_state["interview_plan_json"]
@@ -413,52 +415,88 @@ def main() -> None:
 
     st.header("Mock interview (guided)")
 
-    start_disabled = not ui_settings["openai_api_key_present"]
-    if st.button("Start interview", type="primary", disabled=start_disabled):
-        guard = validate_inputs(role, focus_areas, job_description)
-        if not guard.allowed:
-            st.warning(guard.user_message)
-        else:
-            ok, msg = rate_limit_ok(timestamps=st.session_state["call_timestamps"])
-            if not ok:
-                st.warning(msg)
+    # Settings change warning
+    if session.active:
+        current_signature = get_interview_config_signature(
+            role=role,
+            focus_areas=focus_areas,
+            difficulty=ui_settings["difficulty"],
+            prompt_strategy=ui_settings["prompt_strategy"],
+            response_style=ui_settings["response_style"],
+            persona=ui_settings["persona"],
+            job_description=job_description,
+        )
+        saved_signature = st.session_state.get("interview_config_signature")
+        if saved_signature and current_signature != saved_signature:
+            st.warning(
+                "Warning: Interview settings have changed. "
+                "To avoid inconsistent results, please reset the interview or revert your changes."
+            )
+
+    col_btn1, col_btn2, _ = st.columns([1, 1, 3])
+    with col_btn1:
+        start_disabled = not ui_settings["openai_api_key_present"]
+        if st.button("Start interview", type="primary", disabled=start_disabled):
+            guard = validate_inputs(role, focus_areas, job_description)
+            if not guard.allowed:
+                st.warning(guard.user_message)
             else:
-                try:
-                    session.active = True
-                    session.max_questions = 5
-                    session.turns = []
-                    st.session_state.pop("final_feedback_text", None)
-                    st.session_state.pop("final_feedback_json", None)
+                ok, msg = rate_limit_ok(timestamps=st.session_state["call_timestamps"])
+                if not ok:
+                    st.warning(msg)
+                else:
+                    try:
+                        session.active = True
+                        session.max_questions = 5
+                        session.turns = []
+                        st.session_state.pop("final_feedback_text", None)
+                        st.session_state.pop("final_feedback_json", None)
 
-                    client = LLMClient(api_key=settings["OPENAI_API_KEY"])
-                    strategy_fn = PROMPT_STRATEGIES[ui_settings["prompt_strategy"]]
-                    system_prompt = strategy_fn(ui_settings["persona"])
-
-                    user_prompt = user_prompt_first_question(
-                        role=role,
-                        focus_areas=focus_areas,
-                        difficulty=ui_settings["difficulty"],
-                        job_description=job_description,
-                        response_style=ui_settings["response_style"],
-                    )
-
-                    with st.spinner("Starting interview..."):  # type: ignore[call-arg]
-                        first_q = client.generate_text(
-                            model=ui_settings["model"],
-                            system_prompt=system_prompt,
-                            user_prompt=user_prompt,
-                            temperature=ui_settings["temperature"],
-                            top_p=ui_settings.get("top_p", 1.0),
-                            presence_penalty=ui_settings.get("presence_penalty", 0.0),
-                            frequency_penalty=ui_settings.get("frequency_penalty", 0.0),
-                            max_output_tokens=ui_settings.get("max_output_tokens", 250),
-                            timeout_seconds=ui_settings.get("timeout_seconds", 30.0),
-                            retries=ui_settings.get("retries", 2),
+                        # Save config signature when starting
+                        st.session_state["interview_config_signature"] = get_interview_config_signature(
+                            role=role,
+                            focus_areas=focus_areas,
+                            difficulty=ui_settings["difficulty"],
+                            prompt_strategy=ui_settings["prompt_strategy"],
+                            response_style=ui_settings["response_style"],
+                            persona=ui_settings["persona"],
+                            job_description=job_description,
                         )
 
-                    session.turns.append(Turn(question=first_q, answer=""))
-                except Exception as exc:
-                    st.error(f"Could not start interview. Error: {exc}")
+                        client = LLMClient(api_key=settings["OPENAI_API_KEY"])
+                        strategy_fn = PROMPT_STRATEGIES[ui_settings["prompt_strategy"]]
+                        system_prompt = strategy_fn(ui_settings["persona"])
+
+                        user_prompt = user_prompt_first_question(
+                            role=role,
+                            focus_areas=focus_areas,
+                            difficulty=ui_settings["difficulty"],
+                            job_description=job_description,
+                            response_style=ui_settings["response_style"],
+                        )
+
+                        with st.spinner("Starting interview..."):  # type: ignore[call-arg]
+                            first_q = client.generate_text(
+                                model=ui_settings["model"],
+                                system_prompt=system_prompt,
+                                user_prompt=user_prompt,
+                                temperature=ui_settings["temperature"],
+                                top_p=ui_settings.get("top_p", 1.0),
+                                presence_penalty=ui_settings.get("presence_penalty", 0.0),
+                                frequency_penalty=ui_settings.get("frequency_penalty", 0.0),
+                                max_output_tokens=ui_settings.get("max_output_tokens", 250),
+                                timeout_seconds=ui_settings.get("timeout_seconds", 30.0),
+                                retries=ui_settings.get("retries", 2),
+                            )
+
+                        session.turns.append(Turn(question=first_q, answer=""))
+                    except Exception as exc:
+                        st.error(format_error_message(exc))
+
+    with col_btn2:
+        if st.button("Reset interview"):
+            reset_interview()
+            st.rerun()
 
     if session.active and session.turns:
         current_q = session.turns[-1].question
@@ -532,6 +570,7 @@ def main() -> None:
                                     )
 
                                 session.turns.append(Turn(question=next_q, answer=""))
+                                st.rerun()
 
                         if submit_end:
                             system_prompt = system_prompt_final_feedback_text()
@@ -587,9 +626,10 @@ def main() -> None:
                             st.session_state["final_feedback_text"] = feedback_text
                             st.session_state["final_feedback_json"] = feedback_json
                             session.active = False
+                            st.rerun()
 
                     except Exception as exc:
-                        st.error(f"Interview action failed. Error: {exc}")
+                        st.error(format_error_message(exc))
 
     if session.turns:
         st.markdown("---")
