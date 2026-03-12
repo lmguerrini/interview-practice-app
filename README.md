@@ -2,6 +2,8 @@
 
 A single-page Interview Practice App for **Software & AI Engineering** interview preparation, built with Streamlit, OpenAI, and Pydantic.
 
+![App Preview](assets/preview.png)
+
 ## Project Structure
 ```text
 .
